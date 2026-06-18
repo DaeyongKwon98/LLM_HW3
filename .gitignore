@@ -135,3 +135,19 @@ data
 hs_err*
 logs_eval
 checkpoints_upload
+# Training artifacts
+/checkpoints/
+/checkpoint/
+/checkpoint-*/
+/model_checkpoint/
+/model_checkpoints/
+/outputs/
+/output/
+/logs/
+/logs_eval/
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+pytorch_model*.bin
+adapter_model*.bin
