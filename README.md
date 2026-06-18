@@ -199,19 +199,37 @@ python 3d_molt5/dpo_lora_train.py \
 
 ## Preference Loss Modes
 
-`--preference_loss`는 세 가지를 지원한다.
+`--preference_loss`는 세 가지 값을 받는다.
 
 - `dpo`: chosen response와 rejected response의 likelihood ratio를 비교한다.
 - `mdpo`: 같은 caption에 대해 chosen E3FP condition과 rejected E3FP condition의 likelihood 차이를 선호 학습한다.
-- `copo`: mDPO 계열 condition preference에 SFT/anchor 항을 함께 사용한다.
+- `copo`: 현재 구현에서는 `mdpo`와 같은 `mdpo_loss()` 경로를 사용한다.
+
+현재 sweep 학습은 `3d_molt5/finetune_scripts/mdpo_lora_pubchem_cap_smiles_ep3.sh`를 통해 `--preference_loss mdpo`로 실행된다. 코드상 `mdpo`와 `copo`는 둘 다 아래 형태의 동일한 loss를 계산한다.
+
+```text
+loss = lambda_sft * loss_sft
+     + lambda_copo * loss_copo
+     + lambda_anchor * loss_anchor
+```
+
+각 항의 의미는 다음과 같다.
+
+- `loss_sft`: chosen/positive E3FP condition에서 reference caption을 생성하도록 하는 NLL/SFT loss.
+- `loss_copo`: chosen E3FP condition의 reward가 rejected E3FP condition의 reward보다 커지도록 하는 condition preference loss.
+- `loss_anchor`: chosen condition reward가 `delta`보다 커지도록 하는 anchor loss.
+
+따라서 현재 코드에서는 `--preference_loss mdpo`를 `--preference_loss copo`로 바꿔도 `lambda_sft`, `lambda_copo`, `lambda_anchor`, `delta` 값이 같으면 학습 objective는 동일하다. 두 모드를 실질적으로 다르게 쓰려면 코드에서 branch를 분리하거나, 실행 인자로 lambda 조합을 다르게 줘야 한다.
 
 주요 loss 관련 option:
 
-- `--beta`: preference loss temperature.
-- `--logprob_reduction`: `sum` 또는 `mean`.
-- `--sft_loss_weight`: DPO mode에서 optional SFT loss weight.
-- `--delta`: mDPO/CoPO anchor margin.
-- `--lambda_sft`, `--lambda_copo`, `--lambda_anchor`: CoPO/mDPO 보조 loss weight.
+- `--beta`: reference model 대비 policy reward의 scale.
+- `--logprob_reduction`: sequence log-prob를 `sum` 또는 `mean`으로 줄이는 방식.
+- `--sft_loss_weight`: `dpo` mode에서만 쓰는 optional SFT loss weight.
+- `--delta`: `loss_anchor`의 reward margin 기준값.
+- `--lambda_sft`: `mdpo`/`copo` 경로에서 SFT 항 weight.
+- `--lambda_copo`: `mdpo`/`copo` 경로에서 condition preference 항 weight.
+- `--lambda_anchor`: `mdpo`/`copo` 경로에서 anchor 항 weight.
 
 ## Training Outputs
 
