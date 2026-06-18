@@ -31,7 +31,6 @@ data/
     test.jsonl
     stats.json
   build_chosen_rejected_splits.py           # positive/negative source files -> train/val/test pair splits
-  build_dpo_caption_pairs_from_chosen_rejected.py
 
 dict/
   selfies_dict.txt                          # molecule tokenizer 추가 token list
@@ -121,15 +120,6 @@ python data/build_chosen_rejected_splits.py \
 - `data/dpo_chosen_rejected/val.jsonl`
 - `data/dpo_chosen_rejected/test.jsonl`
 - `data/dpo_chosen_rejected/stats.json`
-
-`data/build_dpo_caption_pairs_from_chosen_rejected.py`는 chosen/rejected split에서 caption-pair DPO data를 만드는 보조 스크립트다. 이 스크립트는 `training_data/build_dpo_caption_pairs_v2.py`를 import하므로, 해당 파일이 있는 환경에서만 동작한다.
-
-```bash
-python data/build_dpo_caption_pairs_from_chosen_rejected.py \
-  --input_dir data/dpo_chosen_rejected \
-  --output_dir data/dpo_caption_pairs_v2 \
-  --splits train val test
-```
 
 ## Training
 

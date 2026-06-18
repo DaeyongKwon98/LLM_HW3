@@ -130,7 +130,11 @@ dmypy.json
 
 3dmolt5/logs
 logs
-data
+
+# Data artifacts are ignored, but data preparation code is kept.
+/data/*
+!/data/
+!/data/build_chosen_rejected_splits.py
 
 hs_err*
 logs_eval
