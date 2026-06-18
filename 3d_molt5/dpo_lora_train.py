@@ -86,6 +86,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lora_alpha", type=float, default=32.0)
     parser.add_argument("--lora_dropout", type=float, default=0.05)
     parser.add_argument(
+        "--tuning_mode",
+        choices=["lora", "full"],
+        default="lora",
+        help="Train LoRA adapters only, or update all policy-model parameters.",
+    )
+    parser.add_argument(
         "--lora_target_modules",
         type=str,
         default="q,k,v,o,wi,wi_0,wi_1,wo",
@@ -1065,14 +1071,68 @@ def save_adapter(
     tokenizer.save_pretrained(output_dir)
 
 
+def save_full_model(
+    model: nn.Module,
+    tokenizer,
+    args: argparse.Namespace,
+    output_dir: str,
+    extra_metadata: Optional[Dict] = None,
+) -> None:
+    os.makedirs(output_dir, exist_ok=True)
+    torch.save(model.state_dict(), os.path.join(output_dir, "pytorch_model_merged.bin"))
+    with open(os.path.join(output_dir, "full_finetune_config.json"), "w", encoding="utf-8") as f:
+        metadata = {
+            "base_model_name": args.model_name,
+            "base_checkpoint_path": args.checkpoint_path,
+            "caption_pair_file": args.caption_pair_file,
+            "train_pair_file": args.train_pair_file,
+            "eval_pair_file": args.eval_pair_file,
+            "positive_file": args.positive_file,
+            "negative_file": args.negative_file,
+            "property_task": args.property_task,
+            "preference_loss": args.preference_loss,
+            "beta": args.beta,
+            "delta": args.delta,
+            "lambda_sft": args.lambda_sft,
+            "lambda_copo": args.lambda_copo,
+            "lambda_anchor": args.lambda_anchor,
+            "prompt_style": args.prompt_style,
+            "tuning_mode": args.tuning_mode,
+            "fp_bits": args.fp_bits,
+            "fp_level": args.fp_level,
+            "emb_setting": args.emb_setting,
+        }
+        if extra_metadata:
+            metadata.update(extra_metadata)
+        json.dump(metadata, f, indent=2)
+    tokenizer.save_pretrained(output_dir)
+
+
+def save_policy_checkpoint(
+    model: nn.Module,
+    tokenizer,
+    args: argparse.Namespace,
+    output_dir: str,
+    matched_modules: Sequence[str],
+    extra_metadata: Optional[Dict] = None,
+) -> None:
+    if args.tuning_mode == "full":
+        save_full_model(model, tokenizer, args, output_dir, extra_metadata=extra_metadata)
+    else:
+        save_adapter(model, tokenizer, args, output_dir, matched_modules, extra_metadata=extra_metadata)
+
+
 def save_final(
     model: nn.Module,
     tokenizer,
     args: argparse.Namespace,
     matched_modules: Sequence[str],
 ) -> None:
-    save_adapter(model, tokenizer, args, args.output_dir, matched_modules)
-    if args.save_merged:
+    if args.tuning_mode == "full":
+        save_full_model(model, tokenizer, args, args.output_dir)
+    else:
+        save_adapter(model, tokenizer, args, args.output_dir, matched_modules)
+    if args.tuning_mode == "lora" and args.save_merged:
         merge_lora_inplace(model)
         torch.save(model.state_dict(), os.path.join(args.output_dir, "pytorch_model_merged.bin"))
 
@@ -1249,19 +1309,24 @@ def main() -> None:
 
     policy_model = load_base_model(args, tokenizer)
     reference_model = load_base_model(args, tokenizer)
-    for parameter in policy_model.parameters():
-        parameter.requires_grad = False
-    matched_modules = inject_lora(
-        policy_model,
-        target_modules=args.lora_target_modules.split(","),
-        r=args.lora_r,
-        alpha=args.lora_alpha,
-        dropout=args.lora_dropout,
-    )
-    if not matched_modules:
-        raise ValueError(f"No LoRA target modules matched: {args.lora_target_modules}")
-    if args.train_fp_embedding:
-        for parameter in policy_model.encoder.molecule_fp_embed_tokens.parameters():
+    matched_modules: List[str] = []
+    if args.tuning_mode == "lora":
+        for parameter in policy_model.parameters():
+            parameter.requires_grad = False
+        matched_modules = inject_lora(
+            policy_model,
+            target_modules=args.lora_target_modules.split(","),
+            r=args.lora_r,
+            alpha=args.lora_alpha,
+            dropout=args.lora_dropout,
+        )
+        if not matched_modules:
+            raise ValueError(f"No LoRA target modules matched: {args.lora_target_modules}")
+        if args.train_fp_embedding:
+            for parameter in policy_model.encoder.molecule_fp_embed_tokens.parameters():
+                parameter.requires_grad = True
+    else:
+        for parameter in policy_model.parameters():
             parameter.requires_grad = True
 
     for parameter in reference_model.parameters():
@@ -1275,7 +1340,10 @@ def main() -> None:
     reference_model.eval()
 
     trainable, total = trainable_parameter_report(policy_model)
-    print(f"LoRA-wrapped modules: {len(matched_modules)}")
+    if args.tuning_mode == "lora":
+        print(f"LoRA-wrapped modules: {len(matched_modules)}")
+    else:
+        print("Tuning mode: full fine-tuning")
     print(f"Trainable parameters: {trainable:,} / {total:,} ({100.0 * trainable / total:.4f}%)")
 
     if args.smoke_test:
@@ -1376,7 +1444,7 @@ def main() -> None:
                     )
                     if is_best:
                         best_metric_value = metric_value
-                        save_adapter(
+                        save_policy_checkpoint(
                             policy_model,
                             tokenizer,
                             args,
@@ -1412,7 +1480,7 @@ def main() -> None:
 
             if args.save_steps > 0 and global_step % args.save_steps == 0:
                 step_dir = os.path.join(args.output_dir, f"checkpoint-{global_step}")
-                save_adapter(policy_model, tokenizer, args, step_dir, matched_modules)
+                save_policy_checkpoint(policy_model, tokenizer, args, step_dir, matched_modules)
 
             if args.max_steps > 0 and global_step >= args.max_steps:
                 break
@@ -1431,7 +1499,7 @@ def main() -> None:
             )
             if is_best:
                 best_metric_value = metric_value
-                save_adapter(
+                save_policy_checkpoint(
                     policy_model,
                     tokenizer,
                     args,
@@ -1461,9 +1529,12 @@ def main() -> None:
                 )
 
     save_final(policy_model, tokenizer, args, matched_modules)
-    print(f"Saved LoRA adapter to {args.output_dir}/adapter_model.bin")
-    if args.save_merged:
-        print(f"Saved merged model to {args.output_dir}/pytorch_model_merged.bin")
+    if args.tuning_mode == "full":
+        print(f"Saved full fine-tuned model to {args.output_dir}/pytorch_model_merged.bin")
+    else:
+        print(f"Saved LoRA adapter to {args.output_dir}/adapter_model.bin")
+        if args.save_merged:
+            print(f"Saved merged model to {args.output_dir}/pytorch_model_merged.bin")
 
 
 if __name__ == "__main__":

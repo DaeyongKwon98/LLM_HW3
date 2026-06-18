@@ -28,7 +28,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--molecule_dict", type=str, default="dict/selfies_dict.txt")
     parser.add_argument("--input_jsonl", type=str, required=True)
     parser.add_argument("--output_jsonl", type=str, required=True)
-    parser.add_argument("--preference_side", choices=["chosen", "rejected"], default="chosen", help="For chosen/rejected pair JSONL, select which E3FP condition to use.")
+    parser.add_argument(
+        "--preference_side",
+        choices=["chosen", "rejected", "negative_1d"],
+        default="chosen",
+        help="For pair JSONL, select which nested condition to use.",
+    )
     parser.add_argument("--reference_field", type=str, default="auto", help="Reference caption field to copy into outputs. auto uses chosen_caption/caption_en/caption.")
     parser.add_argument("--prompt_style", choices=["plain", "instruction", "mdpo_instruction"], default="plain")
     parser.add_argument("--max_samples", type=int, default=0)
@@ -168,12 +173,12 @@ def get_nested_side(row: Dict, side: str) -> Dict:
 
 
 def get_row_value(row: Dict, key: str, side: Optional[str] = None):
-    if key in row:
-        return row[key]
     if side:
         nested = get_nested_side(row, side)
         if key in nested:
             return nested[key]
+    if key in row:
+        return row[key]
     return None
 
 
@@ -201,8 +206,8 @@ def get_reference(row: Dict, args: argparse.Namespace) -> Optional[str]:
 
 def make_prompt_row(row: Dict, side: str) -> Dict:
     nested = get_nested_side(row, side)
-    prompt_row = dict(nested)
-    prompt_row.update({k: v for k, v in row.items() if k not in {"chosen", "rejected"}})
+    prompt_row = {k: v for k, v in row.items() if k not in {"chosen", "rejected"}}
+    prompt_row.update(nested)
     return prompt_row
 
 

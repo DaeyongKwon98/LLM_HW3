@@ -96,17 +96,21 @@ run_one() {
         >> "${MANIFEST}"
 }
 
-configs=(
-    "16 32 1e-5"
-    "16 32 5e-5"
-    "16 32 1e-4"
-    "32 64 1e-5"
-    "32 64 5e-5"
-    "32 64 1e-4"
-    "64 128 1e-5"
-    "64 128 5e-5"
-    "64 128 1e-4"
-)
+if [[ -n "${CONFIGS:-}" ]]; then
+    mapfile -t configs < <(printf '%s\n' "${CONFIGS}" | sed '/^[[:space:]]*$/d')
+else
+    configs=(
+        "16 32 1e-5"
+        "16 32 5e-5"
+        "16 32 1e-4"
+        "32 64 1e-5"
+        "32 64 5e-5"
+        "32 64 1e-4"
+        "64 128 1e-5"
+        "64 128 5e-5"
+        "64 128 1e-4"
+    )
+fi
 
 for worker_idx in "${!GPUS[@]}"; do
     gpu="${GPUS[${worker_idx}]}"
